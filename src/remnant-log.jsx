@@ -129,9 +129,12 @@ export default function RemnantLog() {
         <div style={S.screen}>
           {/* header */}
           <div style={S.header}>
-            <div>
-              <div style={S.logoEn}>remnant log</div>
-              <div style={S.logoJa}>感情の痕跡を、場所に刻む</div>
+            <div style={S.logoWrap}>
+              <img src="/remnant_log_logo.png" alt="remnant log" style={S.logoImg} />
+              <div>
+                <div style={S.logoEn}>remnant log</div>
+                <div style={S.logoJa}>感情の痕跡を、場所に刻む</div>
+              </div>
             </div>
             <div style={S.locBadge}>
               <span style={S.locDot} className="loc-pulse" />
@@ -375,9 +378,11 @@ const S = {
   screen: { minHeight: "100vh", display: "flex", flexDirection: "column", paddingBottom: 100 },
 
   // Header
-  header: { padding: "32px 22px 18px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #151310" },
-  logoEn: { fontFamily: "'DM Mono', monospace", fontSize: 22, letterSpacing: "0.05em", color: "#e8e4dc", fontWeight: 400 },
-  logoJa: { fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#2e2c28", letterSpacing: "0.1em", marginTop: 5 },
+  header: { padding: "24px 22px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #151310" },
+  logoWrap: { display: "flex", alignItems: "center", gap: 12 },
+  logoImg: { width: 36, height: 36, objectFit: "contain", borderRadius: 6, flexShrink: 0 },
+  logoEn: { fontFamily: "'DM Mono', monospace", fontSize: 20, letterSpacing: "0.05em", color: "#e8e4dc", fontWeight: 400 },
+  logoJa: { fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#2e2c28", letterSpacing: "0.1em", marginTop: 4 },
   locBadge: { display: "flex", alignItems: "center", gap: 7, padding: "6px 10px", border: "1px solid #1c1a16", borderRadius: 20 },
   locDot: { width: 6, height: 6, borderRadius: "50%", background: "#5a8a5a", display: "block" },
   locText: { fontSize: 9, color: "#3a3830", letterSpacing: "0.1em" },
