@@ -130,7 +130,7 @@ export default function RemnantLog() {
           {/* header */}
           <div style={S.header}>
             <div style={S.logoWrap}>
-              <img src="/remnant_log_logo_wh.png" alt="remnant log" style={S.logoImg} />
+              <img src="/remnant_log/remnant_log_logo_wh.png" alt="remnant log" style={S.logoImg} />
             </div>
             <div style={S.locBadge}>
               <span style={S.locDot} className="loc-pulse" />
