@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>remnant log AR</title>
+  <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; }
+    #ui {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none; z-index: 100;
+      font-family: 'Courier New', monospace;
+    }
+    #close-btn {
+      position: fixed; top: 20px; right: 20px;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: rgba(10,9,8,0.75);
+      border: 1px solid #2a2620;
+      color: #666; font-size: 14px;
+      cursor: pointer; pointer-events: all;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200;
+    }
+    #loading {
+      position: fixed; inset: 0;
+      background: #0a0908;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px; z-index: 300;
+      color: #3a3832; font-size: 11px; letter-spacing: 0.15em;
+    }
+    #loading-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #c8b88a;
+      animation: pulse 1.5s ease infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.3; transform: scale(1.5); }
+    }
+    #dist-badge {
+      position: fixed; bottom: 36px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px;
+      font-size: 10px; color: #3a3832; letter-spacing: 0.15em;
+      pointer-events: none;
+    }
+    #dist-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #c8b88a;
+      animation: pulse 2s ease infinite;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loading">
+    <div id="loading-dot"></div>
+    <div>カメラと位置情報を取得しています</div>
+  </div>
+
+  <div id="ui">
+    <div id="dist-badge">
+      <div id="dist-dot"></div>
+      <span id="dist-text">-- m</span>
+    </div>
+  </div>
+
+  <button id="close-btn" onclick="history.back()">✕</button>
+
+  <a-scene
+    id="scene"
+    vr-mode-ui="enabled: false"
+    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+    renderer="antialias: true; alpha: true;"
+    style="display:none"
+  >
+    <a-entity id="text-entity"></a-entity>
+    <a-camera gps-projected-camera rotation-reader></a-camera>
+  </a-scene>
+
+  <script>
+    // URLパラメータ取得
+    const params = new URLSearchParams(location.search);
+    const remnantText = params.get('text') || '';
+    const remnantUID  = params.get('uid') || '';
+    const remnantTs   = params.get('timestamp') || '';
+    const remnantExp  = params.get('expires') || '';
+    const remnantLat  = parseFloat(params.get('lat'));
+    const remnantLng  = parseFloat(params.get('lng'));
+
+    // Canvas テキストレンダリング（日本語対応）
+    function createTextCanvas(text, uid, timestamp, expires) {
+      const canvas = document.createElement('canvas');
+      canvas.width  = 600;
+      canvas.height = 320;
+      const ctx = canvas.getContext('2d');
+
+      // 背景
+      ctx.fillStyle = 'rgba(10, 9, 8, 0.92)';
+      ctx.beginPath();
+      ctx.roundRect(0, 0, 600, 320, 14);
+      ctx.fill();
+
+      // ボーダー
+      ctx.strokeStyle = 'rgba(200,184,138,0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(1, 1, 598, 318, 14);
+      ctx.stroke();
+
+      // UID
+      ctx.fillStyle = '#c8b88a';
+      ctx.font = '22px Courier New';
+      ctx.fillText(uid, 28, 42);
+
+      // timestamp
+      ctx.fillStyle = '#3a3832';
+      ctx.font = '18px Courier New';
+      const tsWidth = ctx.measureText(timestamp).width;
+      ctx.fillText(timestamp, 600 - 28 - tsWidth, 42);
+
+      // 区切り線
+      ctx.strokeStyle = 'rgba(200,184,138,0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(28, 56);
+      ctx.lineTo(572, 56);
+      ctx.stroke();
+
+      // 本文（テキスト折り返し）
+      ctx.fillStyle = '#d8d4cc';
+      ctx.font = '26px serif';
+      const maxWidth = 544;
+      const lineHeight = 42;
+      let y = 100;
+      let line = '';
+      for (let i = 0; i < text.length; i++) {
+        const testLine = line + text[i];
+        if (ctx.measureText(testLine).width > maxWidth && line.length > 0) {
+          ctx.fillText(line, 28, y);
+          line = text[i];
+          y += lineHeight;
+        } else {
+          line = testLine;
+        }
+      }
+      ctx.fillText(line, 28, y);
+
+      // 区切り線（下）
+      ctx.strokeStyle = 'rgba(200,184,138,0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(28, 274);
+      ctx.lineTo(572, 274);
+      ctx.stroke();
+
+      // expires
+      ctx.fillStyle = expires === 'forever' ? '#b0a888' : '#6a7a6a';
+      ctx.font = '16px Courier New';
+      ctx.fillText(expires === 'forever' ? '永遠に残る' : '1週間で消える', 28, 298);
+
+      return canvas;
+    }
+
+    // Haversine
+    function haversine(lat1, lng1, lat2, lng2) {
+      const R = 6371000;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 +
+        Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    // シーン初期化
+    function initScene() {
+      document.getElementById('loading').style.display = 'none';
+      const scene = document.getElementById('scene');
+      scene.style.display = '';
+
+      const entity = document.getElementById('text-entity');
+
+      // Canvas テクスチャ
+      const canvas = createTextCanvas(remnantText, remnantUID, remnantTs, remnantExp);
+      const texture = new THREE.CanvasTexture(canvas);
+
+      // プレーンのアスペクト比（600:320 = 1.875:1）
+      const planeW = 3.0;
+      const planeH = planeW / (600 / 320);
+
+      const plane = document.createElement('a-plane');
+      plane.setAttribute('width', planeW);
+      plane.setAttribute('height', planeH);
+      plane.setAttribute('material', 'transparent: true; opacity: 1;');
+      plane.setAttribute('look-at', '[gps-projected-camera]');
+
+      entity.setAttribute('gps-projected-entity-place', `latitude: ${remnantLat}; longitude: ${remnantLng}`);
+      entity.appendChild(plane);
+
+      // Three.js マテリアルにCanvasテクスチャを適用
+      plane.addEventListener('loaded', () => {
+        const mesh = plane.getObject3D('mesh');
+        if (mesh) {
+          mesh.material.map = texture;
+          mesh.material.transparent = true;
+          mesh.material.needsUpdate = true;
+        }
+      });
+
+      // 距離表示
+      navigator.geolocation.watchPosition((pos) => {
+        const dist = haversine(pos.coords.latitude, pos.coords.longitude, remnantLat, remnantLng);
+        document.getElementById('dist-text').textContent = Math.round(dist) + 'm';
+      }, null, { enableHighAccuracy: true });
+    }
+
+    // カメラ・位置情報の権限を取得してからシーン起動
+    async function start() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
+        });
+        initScene();
+      } catch (e) {
+        document.getElementById('loading').innerHTML =
+          '<div style="color:#8a5a5a;font-size:11px;letter-spacing:0.1em;padding:32px;text-align:center;">カメラまたは位置情報の<br>許可が必要です</div>';
+      }
+    }
+
+    start();
+  </script>
+</body>
+</html>
