@@ -147,8 +147,8 @@ export default function RemnantLog() {
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deleteTarget || !currentPos) return;
-    if (deleteTarget.expires === "forever") {
+    if (!deleteTarget) return;
+    if (deleteTarget.expires === "forever" && currentPos) {
       const dist = haversineDistance(currentPos.lat, currentPos.lng, deleteTarget.lat, deleteTarget.lng);
       if (dist > 30) {
         setDeleteError(`削除するにはその場所に戻る必要があります（現在${Math.round(dist)}m離れています）`);
@@ -156,9 +156,11 @@ export default function RemnantLog() {
       }
     }
     await deleteRemnant(deleteTarget.id);
-    const nearby = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
-    setRemnants(nearby);
-    setMyRemnants(nearby.filter(r => r.uid === uid));
+    if (currentPos) {
+      const nearby = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
+      setRemnants(nearby);
+      setMyRemnants(nearby.filter(r => r.uid === uid));
+    }
     setDeleteTarget(null);
     setDeleteError(null);
     setView("home");
@@ -231,14 +233,15 @@ export default function RemnantLog() {
             <div style={S.list}>
               {myRemnants.length === 0 && <div style={S.empty}>まだ何も残していません</div>}
               {myRemnants.map((item, i) => (
-                <div key={item.id} style={{ ...S.card, animationDelay: `${i * 60}ms` }} className="fade-up">
+                <div key={item.id} style={{ ...S.card, animationDelay: `${i * 60}ms` }} className="fade-up"
+                  onClick={() => openAR(item)}>
                   <div style={S.cardMeta}>
                     <span style={S.myTag}>自分</span>
                     <span style={S.cardDist}>{item.distance === 0 ? "現在地" : `${item.distance}m`}</span>
                     <span style={{ ...S.expiryBadge, ...(item.expires === "forever" ? S.forever : S.week) }}>
                       {item.expires === "forever" ? "永遠" : "1週間"}
                     </span>
-                    <button style={S.deleteBtn} onClick={() => { setDeleteTarget(item); setDeleteError(null); setView("delete_confirm"); }}>削除</button>
+                    <button style={S.deleteBtn} onClick={e => { e.stopPropagation(); setDeleteTarget(item); setDeleteError(null); setView("delete_confirm"); }}>削除</button>
                   </div>
                   <div style={S.cardText}>{item.text}</div>
                   <div style={S.cardTs}>{item.timestamp}</div>
@@ -356,7 +359,7 @@ const S = {
   screen: { minHeight: "100vh", display: "flex", flexDirection: "column", paddingBottom: 100 },
   header: { padding: "24px 22px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #151310" },
   logoWrap: { display: "flex", alignItems: "center", gap: 10 },
-  logoImg: { height: 28, width: "auto", objectFit: "contain", flexShrink: 0 },
+  logoImg: { height: 30, width: "auto", objectFit: "contain", flexShrink: 0 },
   locBadge: { display: "flex", alignItems: "center", gap: 7, padding: "6px 10px", border: "1px solid #1c1a16", borderRadius: 20 },
   locDot: { width: 6, height: 6, borderRadius: "50%", display: "block" },
   locText: { fontSize: 9, color: "#3a3830", letterSpacing: "0.1em" },
