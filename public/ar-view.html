@@ -3,178 +3,182 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-  <title>remnant log</title>
+  <title>remnant log AR</title>
   <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
   <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#000; overflow:hidden; font-family:'Courier New',monospace; }
 
-    /* ローディング画面 */
-    #loading {
-      position:fixed; inset:0; background:#0a0908; z-index:999;
-      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px;
-    }
-    #loading-dot { width:8px; height:8px; border-radius:50%; background:#c8b88a; animation:pulse 1.5s ease infinite; }
-    #loading-msg { font-size:11px; color:#3a3832; letter-spacing:0.15em; text-align:center; line-height:2; }
-    #loading-err { font-size:11px; color:#8a5a5a; letter-spacing:0.1em; text-align:center; padding:0 32px; line-height:2; display:none; }
+    /* シーンは常に全画面 */
+    a-scene { width:100vw; height:100vh; }
 
-    /* メッセージオーバーレイ（マーカータップ時） */
-    #msg-overlay {
-      position:fixed; inset:0; z-index:500; background:rgba(0,0,0,0.7);
-      display:none; align-items:center; justify-content:center; padding:32px;
+    /* ローディングオーバーレイ */
+    #overlay {
+      position:fixed; inset:0; z-index:900;
+      background:#0a0908;
+      display:flex; flex-direction:column;
+      align-items:center; justify-content:center; gap:20px;
+      transition:opacity 0.6s ease;
     }
-    #msg-overlay.active { display:flex; }
-    #msg-box {
-      background:#0e0c0a; border:1px solid #2a2620; border-radius:6px;
-      padding:24px; width:100%; max-width:360px;
-      animation:fadeUp 0.3s ease;
+    #overlay.hidden { opacity:0; pointer-events:none; }
+    #ov-dot { width:8px; height:8px; border-radius:50%; background:#c8b88a; animation:pulse 1.5s ease infinite; }
+    #ov-msg { font-size:11px; color:#3a3832; letter-spacing:0.15em; text-align:center; line-height:2.2; padding:0 32px; }
+    #ov-err { font-size:11px; color:#8a5a5a; letter-spacing:0.1em; text-align:center; padding:16px 32px; line-height:2; display:none; }
+    #ov-retry { display:none; margin-top:8px; font-size:10px; color:#c8b88a; background:none; border:1px solid #2e2a1e; padding:8px 20px; border-radius:3px; cursor:pointer; letter-spacing:0.1em; }
+
+    /* メッセージパネル */
+    #msg-panel {
+      position:fixed; bottom:0; left:0; right:0; z-index:800;
+      background:#0e0c0a; border-top:1px solid #2a2620;
+      padding:20px 22px 36px;
+      transform:translateY(100%);
+      transition:transform 0.35s cubic-bezier(0.16,1,0.3,1);
     }
-    #msg-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    #msg-panel.open { transform:translateY(0); }
+    #msg-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
     #msg-uid { font-size:10px; color:#c8b88a; letter-spacing:0.1em; }
-    #msg-ts { font-size:9px; color:#3a3832; }
-    #msg-divider { height:1px; background:linear-gradient(90deg,transparent,#2a2620,transparent); margin-bottom:16px; }
-    #msg-text { font-size:14px; line-height:1.95; color:#d8d4cc; margin-bottom:16px; }
-    #msg-footer { display:flex; justify-content:space-between; align-items:center; }
-    #msg-exp { font-size:9px; color:#3a3832; letter-spacing:0.08em; }
-    #msg-close { font-size:10px; color:#c8b88a; background:none; border:1px solid #2e2a1e; padding:4px 12px; border-radius:3px; cursor:pointer; letter-spacing:0.08em; }
+    #msg-ts  { font-size:9px;  color:#3a3832; }
+    #msg-div { height:1px; background:linear-gradient(90deg,transparent,#2a2620,transparent); margin-bottom:14px; }
+    #msg-body { font-size:14px; line-height:1.95; color:#d8d4cc; margin-bottom:14px; }
+    #msg-foot { display:flex; justify-content:space-between; align-items:center; }
+    #msg-exp  { font-size:9px; color:#3a3832; letter-spacing:0.08em; }
+    #msg-close { font-size:10px; color:#c8b88a; background:none; border:1px solid #2e2a1e; padding:5px 14px; border-radius:3px; cursor:pointer; letter-spacing:0.08em; }
 
     /* 閉じるボタン */
-    #close-btn {
-      position:fixed; top:20px; right:20px; z-index:400;
-      width:40px; height:40px; border-radius:50%;
-      background:rgba(10,9,8,0.8); border:1px solid #2a2620;
-      color:#666; font-size:14px; cursor:pointer;
-      display:flex; align-items:center; justify-content:center;
+    #back-btn {
+      position:fixed; top:20px; left:20px; z-index:700;
+      background:rgba(10,9,8,0.85); border:1px solid #2a2620;
+      color:#888; font-size:12px; padding:8px 14px;
+      border-radius:20px; cursor:pointer; letter-spacing:0.08em;
     }
 
-    /* 距離バッジ */
+    /* ヒント */
     #hint {
       position:fixed; bottom:32px; left:50%; transform:translateX(-50%);
-      font-size:10px; color:#3a3832; letter-spacing:0.12em;
-      background:rgba(10,9,8,0.7); padding:6px 14px; border-radius:20px;
-      border:1px solid #1a1816; z-index:300;
+      z-index:600; font-size:10px; color:#3a3832; letter-spacing:0.12em;
+      background:rgba(10,9,8,0.75); padding:6px 16px;
+      border-radius:20px; border:1px solid #1a1816;
+      white-space:nowrap;
     }
+    #hint.hidden { display:none; }
 
     @keyframes pulse { 0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.3;transform:scale(1.5);} }
-    @keyframes fadeUp { from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);} }
   </style>
 </head>
 <body>
 
-  <!-- ローディング -->
-  <div id="loading">
-    <div id="loading-dot"></div>
-    <div id="loading-msg">カメラと位置情報を取得しています<br>許可を求めるダイアログが表示されたら「許可」を選んでください</div>
-    <div id="loading-err"></div>
+  <!-- ローディングオーバーレイ（シーンの上に被せる） -->
+  <div id="overlay">
+    <div id="ov-dot"></div>
+    <div id="ov-msg">カメラと位置情報を起動しています<br>許可ダイアログが表示されたら「許可」を選んでください</div>
+    <div id="ov-err"></div>
+    <button id="ov-retry" onclick="start()">もう一度試す</button>
   </div>
 
-  <!-- メッセージオーバーレイ -->
-  <div id="msg-overlay">
-    <div id="msg-box">
-      <div id="msg-header">
-        <span id="msg-uid"></span>
-        <span id="msg-ts"></span>
-      </div>
-      <div id="msg-divider"></div>
-      <div id="msg-text"></div>
-      <div id="msg-footer">
-        <span id="msg-exp"></span>
-        <button id="msg-close" onclick="closeMsg()">閉じる</button>
-      </div>
+  <!-- メッセージパネル -->
+  <div id="msg-panel">
+    <div id="msg-top">
+      <span id="msg-uid"></span>
+      <span id="msg-ts"></span>
+    </div>
+    <div id="msg-div"></div>
+    <div id="msg-body"></div>
+    <div id="msg-foot">
+      <span id="msg-exp"></span>
+      <button id="msg-close" onclick="closeMsg()">閉じる</button>
     </div>
   </div>
 
   <!-- 戻るボタン -->
-  <button id="close-btn" onclick="history.back()">✕</button>
+  <button id="back-btn" onclick="history.back()">← 戻る</button>
 
   <!-- ヒント -->
-  <div id="hint">痕跡に近づいてタップしてください</div>
+  <div id="hint">痕跡のマーカーをタップしてください</div>
 
-  <!-- A-Frame シーン（初期は非表示） -->
+  <!-- A-Frameシーン（常にDOMに存在） -->
   <a-scene
-    id="ar-scene"
+    id="scene"
     vr-mode-ui="enabled: false"
     arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
     renderer="antialias: true; alpha: true; logarithmicDepthBuffer: true;"
     embedded
-    style="display:none; width:100%; height:100vh;"
   >
-    <a-camera gps-projected-camera rotation-reader></a-camera>
+    <a-camera
+      id="camera"
+      gps-projected-camera
+      rotation-reader
+      cursor="rayOrigin: mouse; fuse: false;"
+      raycaster="objects: .clickable; far: 10000;"
+    ></a-camera>
   </a-scene>
 
   <script>
-    // sessionStorageから痕跡データを取得
     const remnants = JSON.parse(sessionStorage.getItem('remnant_nearby') || '[]');
+    const ownUID   = sessionStorage.getItem('remnant_own_uid') || '';
 
-    // マーカーCanvas生成（発光する丸いドット）
-    function makeMarkerCanvas(isOwn) {
-      const c = document.createElement('canvas');
-      c.width = 128; c.height = 128;
-      const ctx = c.getContext('2d');
-      // 外側グロー
-      const grad = ctx.createRadialGradient(64,64,10,64,64,60);
-      grad.addColorStop(0, isOwn ? 'rgba(138,184,200,0.9)' : 'rgba(200,184,138,0.9)');
-      grad.addColorStop(0.5, isOwn ? 'rgba(138,184,200,0.4)' : 'rgba(200,184,138,0.4)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(64,64,60,0,Math.PI*2);
-      ctx.fill();
-      // 中心ドット
-      ctx.fillStyle = isOwn ? '#8ab8c8' : '#c8b88a';
-      ctx.beginPath();
-      ctx.arc(64,64,12,0,Math.PI*2);
-      ctx.fill();
-      return c;
-    }
-
-    // メッセージオーバーレイを表示
     function showMsg(r) {
-      document.getElementById('msg-uid').textContent  = r.uid;
-      document.getElementById('msg-ts').textContent   = r.timestamp;
-      document.getElementById('msg-text').textContent = r.text;
-      document.getElementById('msg-exp').textContent  = r.expires === 'forever' ? '永遠に残る' : '1週間で消える';
-      document.getElementById('msg-overlay').classList.add('active');
+      document.getElementById('msg-uid').textContent  = r.uid || '';
+      document.getElementById('msg-ts').textContent   = r.timestamp || '';
+      document.getElementById('msg-body').textContent = r.text || '';
+      document.getElementById('msg-exp').textContent  =
+        r.expires === 'forever' ? '永遠に残る' : '1週間で消える';
+      document.getElementById('msg-panel').classList.add('open');
+      document.getElementById('hint').classList.add('hidden');
     }
 
     function closeMsg() {
-      document.getElementById('msg-overlay').classList.remove('active');
+      document.getElementById('msg-panel').classList.remove('open');
+      document.getElementById('hint').classList.remove('hidden');
     }
 
-    // ARシーン初期化
-    function initScene(userLat, userLng) {
-      document.getElementById('loading').style.display = 'none';
-      const scene = document.getElementById('ar-scene');
-      scene.style.display = '';
+    // Canvas でグローマーカーを生成（日本語テキスト不要）
+    function makeMarker(isOwn) {
+      const c   = document.createElement('canvas');
+      c.width   = 128;
+      c.height  = 128;
+      const ctx = c.getContext('2d');
+      const col = isOwn ? '138,184,200' : '200,184,138';
+      // グロー
+      const g = ctx.createRadialGradient(64,64,8,64,64,56);
+      g.addColorStop(0,   `rgba(${col},0.95)`);
+      g.addColorStop(0.4, `rgba(${col},0.5)`);
+      g.addColorStop(1,   `rgba(${col},0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(64,64,56,0,Math.PI*2); ctx.fill();
+      // コア
+      ctx.fillStyle = `rgba(${col},1)`;
+      ctx.beginPath(); ctx.arc(64,64,10,0,Math.PI*2); ctx.fill();
+      return c;
+    }
 
-      remnants.forEach((r, i) => {
+    // エンティティを追加
+    function addMarkers() {
+      const scene = document.getElementById('scene');
+      remnants.forEach(r => {
         if (r.lat == null || r.lng == null) return;
-        const isOwn = r.uid && r.uid === sessionStorage.getItem('remnant_uid_ref');
+        const isOwn = r.uid === ownUID;
+        const tex   = new THREE.CanvasTexture(makeMarker(isOwn));
 
-        // マーカーテクスチャ
-        const canvas  = makeMarkerCanvas(isOwn);
-        const texture = new THREE.CanvasTexture(canvas);
-
-        // エンティティ
         const entity = document.createElement('a-entity');
-        entity.setAttribute('gps-projected-entity-place', `latitude: ${r.lat}; longitude: ${r.lng}`);
+        entity.setAttribute('gps-projected-entity-place',
+          `latitude: ${r.lat}; longitude: ${r.lng}`);
 
         const plane = document.createElement('a-plane');
-        plane.setAttribute('width',  '1.5');
-        plane.setAttribute('height', '1.5');
-        plane.setAttribute('look-at',  '[gps-projected-camera]');
+        plane.setAttribute('width',    '1.5');
+        plane.setAttribute('height',   '1.5');
         plane.setAttribute('position', '0 1.5 0');
-        plane.setAttribute('material', 'transparent: true; opacity: 1; side: double;');
-        plane.setAttribute('class', 'clickable');
+        plane.setAttribute('look-at',  '[gps-projected-camera]');
+        plane.setAttribute('class',    'clickable');
+        plane.setAttribute('material',
+          'transparent: true; opacity: 1; side: double; depthTest: false;');
 
-        // クリックでメッセージ表示
         plane.addEventListener('click', () => showMsg(r));
 
         plane.addEventListener('loaded', () => {
           const mesh = plane.getObject3D('mesh');
           if (mesh) {
-            mesh.material.map = texture;
+            mesh.material.map         = tex;
             mesh.material.transparent = true;
             mesh.material.needsUpdate = true;
           }
@@ -183,39 +187,49 @@
         entity.appendChild(plane);
         scene.appendChild(entity);
       });
-
-      // クリックシステム有効化
-      scene.setAttribute('cursor', 'rayOrigin: mouse');
     }
 
-    // 権限取得 → シーン起動
+    // 権限取得 → マーカー追加 → オーバーレイ除去
     async function start() {
-      const errEl = document.getElementById('loading-err');
+      const errEl   = document.getElementById('ov-err');
+      const retryEl = document.getElementById('ov-retry');
+      const msgEl   = document.getElementById('ov-msg');
+      errEl.style.display   = 'none';
+      retryEl.style.display = 'none';
 
-      // 1. カメラ権限
+      // カメラ権限
       try {
+        msgEl.textContent = 'カメラの許可を求めています...';
         await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
       } catch(e) {
+        errEl.textContent   = 'カメラの許可が必要です。\nブラウザの設定からカメラを許可してください。';
         errEl.style.display = '';
-        errEl.textContent = 'カメラの許可が必要です。ブラウザの設定からカメラを許可してください。';
+        retryEl.style.display = '';
         return;
       }
 
-      // 2. 位置情報権限
+      // 位置情報権限
       try {
-        await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(
-            pos => resolve(pos),
-            err => reject(err),
-            { enableHighAccuracy: true, timeout: 10000 }
-          );
-        }).then(pos => {
-          initScene(pos.coords.latitude, pos.coords.longitude);
-        });
+        msgEl.textContent = '位置情報の許可を求めています...';
+        await new Promise((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject,
+            { enableHighAccuracy: true, timeout: 15000 })
+        );
       } catch(e) {
+        errEl.textContent   = '位置情報の許可が必要です。\nブラウザの設定から位置情報を許可してください。';
         errEl.style.display = '';
-        errEl.textContent = '位置情報の許可が必要です。ブラウザの設定から位置情報を許可してください。';
+        retryEl.style.display = '';
+        return;
       }
+
+      // マーカー追加
+      msgEl.textContent = '痕跡を配置しています...';
+      addMarkers();
+
+      // オーバーレイをフェードアウト
+      setTimeout(() => {
+        document.getElementById('overlay').classList.add('hidden');
+      }, 800);
     }
 
     start();
