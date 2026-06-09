@@ -9,31 +9,33 @@ import {
 } from "./firebase.js";
 
 const BASE = import.meta.env.BASE_URL;
-
 const DURATION_OPTIONS = [
   { value: "week",    main: "1週間", sub: "7日後に消える" },
   { value: "forever", main: "永遠",  sub: "その場所に戻って消す" },
 ];
 
 export default function RemnantLog() {
-  const [view, setView]               = useState("home");
-  const [tab, setTab]                 = useState("nearby");
-  const [remnants, setRemnants]       = useState([]);
-  const [myRemnants, setMyRemnants]   = useState([]);
-  const [trailUID, setTrailUID]       = useState(null);
-  const [trailItems, setTrailItems]   = useState([]);
-  const [draft, setDraft]             = useState({ text: "", expires: null });
-  const [charCount, setCharCount]     = useState(0);
-  const [posted, setPosted]           = useState(false);
+  const uid = getUserUID(); // 起動時に一度だけ取得
+  const [view, setView]                 = useState("home");
+  const [tab, setTab]                   = useState("nearby");
+  const [remnants, setRemnants]         = useState([]);
+  const [trailUID, setTrailUID]         = useState(null);
+  const [trailItems, setTrailItems]     = useState([]);
+  const [draft, setDraft]               = useState({ text: "", expires: null });
+  const [charCount, setCharCount]       = useState(0);
+  const [posted, setPosted]             = useState(false);
   const [notification, setNotification] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError]   = useState(null);
-  const [loading, setLoading]         = useState(true);
-  const [gpsError, setGpsError]       = useState(null);
-  const [currentPos, setCurrentPos]   = useState(null);
+  const [loading, setLoading]           = useState(true);
+  const [gpsError, setGpsError]         = useState(null);
+  const [currentPos, setCurrentPos]     = useState(null);
   const notifiedIds = useRef(new Set());
-  const uid = getUserUID();
 
+  const myRemnants    = remnants.filter(r => r.uid === uid);
+  const otherRemnants = remnants.filter(r => r.uid !== uid);
+
+  // 初回GPS + データ取得
   useEffect(() => {
     if (!navigator.geolocation) {
       setGpsError("このブラウザはGPSに対応していません");
@@ -41,49 +43,50 @@ export default function RemnantLog() {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
+      async ({ coords: { latitude, longitude } }) => {
         setCurrentPos({ lat: latitude, lng: longitude });
         try {
-          const nearby = await loadNearbyRemnants(latitude, longitude);
-          setRemnants(nearby);
-          setMyRemnants(nearby.filter(r => r.uid === uid));
-        } catch (e) { console.error(e); }
+          const data = await loadNearbyRemnants(latitude, longitude);
+          setRemnants(data);
+        } catch(e) { console.error('Firestore error:', e); }
         setLoading(false);
       },
       () => { setGpsError("位置情報の取得に失敗しました"); setLoading(false); },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: true, timeout: 15000 }
     );
   }, []);
 
+  // 継続GPS監視（通知用）
   useEffect(() => {
     if (!navigator.geolocation) return;
-    const watchId = navigator.geolocation.watchPosition(
-      async (pos) => {
-        const { latitude, longitude } = pos.coords;
+    const id = navigator.geolocation.watchPosition(
+      async ({ coords: { latitude, longitude } }) => {
         setCurrentPos({ lat: latitude, lng: longitude });
-        const nearby = await loadNearbyRemnants(latitude, longitude);
-        setRemnants(nearby);
-        setMyRemnants(nearby.filter(r => r.uid === uid));
-        for (const r of nearby) {
-          if (r.uid === uid) continue;
-          if (notifiedIds.current.has(r.id)) continue;
-          if (r.distance <= 20) {
-            notifiedIds.current.add(r.id);
-            setNotification(r);
-            break;
+        try {
+          const data = await loadNearbyRemnants(latitude, longitude);
+          setRemnants(data);
+          // 自分以外の痕跡のみ通知
+          for (const r of data) {
+            if (r.uid === uid) continue;
+            if (notifiedIds.current.has(r.id)) continue;
+            if (r.distance <= 20) {
+              notifiedIds.current.add(r.id);
+              setNotification(r);
+              break;
+            }
           }
-        }
+        } catch(e) { console.error(e); }
       },
       null,
-      { enableHighAccuracy: true, maximumAge: 10000 }
+      { enableHighAccuracy: true, maximumAge: 15000 }
     );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, []);
+    return () => navigator.geolocation.clearWatch(id);
+  }, [uid]);
 
-  // 全ての痕跡（自分含む）をARに渡す
+  // ARカメラを開く
   const openARCamera = () => {
     sessionStorage.setItem('remnant_nearby', JSON.stringify(remnants));
+    sessionStorage.setItem('remnant_own_uid', uid);
     window.location.href = `${BASE}ar-view.html`;
   };
 
@@ -103,39 +106,50 @@ export default function RemnantLog() {
         text: draft.text, expires: draft.expires,
         lat: currentPos.lat, lng: currentPos.lng, uid,
       });
-      const nearby = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
-      setRemnants(nearby);
-      setMyRemnants(nearby.filter(r => r.uid === uid));
-    } catch (e) { console.error(e); }
+      // 投稿後に再取得
+      const data = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
+      setRemnants(data);
+    } catch(e) { console.error('Post error:', e); }
     setTimeout(() => {
-      setPosted(false); setDraft({ text: "", expires: null }); setCharCount(0);
-      setView("home"); setTab("mine");
+      setPosted(false);
+      setDraft({ text: "", expires: null });
+      setCharCount(0);
+      setView("home");
+      setTab("mine");
     }, 2200);
   };
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
+    // 「永遠」の場合は場所チェック
     if (deleteTarget.expires === "forever" && currentPos) {
-      const dist = haversineDistance(currentPos.lat, currentPos.lng, deleteTarget.lat, deleteTarget.lng);
+      const dist = haversineDistance(
+        currentPos.lat, currentPos.lng,
+        deleteTarget.lat, deleteTarget.lng
+      );
       if (dist > 30) {
         setDeleteError(`削除するにはその場所に戻る必要があります（現在${Math.round(dist)}m離れています）`);
         return;
       }
     }
-    await deleteRemnant(deleteTarget.id);
-    if (currentPos) {
-      const nearby = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
-      setRemnants(nearby);
-      setMyRemnants(nearby.filter(r => r.uid === uid));
-    }
-    setDeleteTarget(null); setDeleteError(null);
-    setView("home"); setTab("mine");
+    try {
+      await deleteRemnant(deleteTarget.id);
+      if (currentPos) {
+        const data = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
+        setRemnants(data);
+      }
+    } catch(e) { console.error('Delete error:', e); }
+    setDeleteTarget(null);
+    setDeleteError(null);
+    setView("home");
+    setTab("mine");
   };
 
   return (
     <div style={S.root}>
       <style>{CSS}</style>
 
+      {/* 通知（他者の痕跡のみ） */}
       {notification && view === "home" && (
         <div style={S.notif} className="slide-down">
           <div style={S.notifPulse} className="pulse-ring" />
@@ -152,19 +166,27 @@ export default function RemnantLog() {
       {view === "home" && (
         <div style={S.screen}>
           <div style={S.header}>
-            <div style={S.logoWrap}>
-              <img src={`${BASE}remnant_log_logo_wh.png`} alt="remnant log" style={S.logoImg} />
-            </div>
+            <img src={`${BASE}remnant_log_logo_wh.png`} alt="remnant log" style={S.logoImg} />
             <div style={S.locBadge}>
-              <span style={{ ...S.locDot, background: gpsError ? "#8a4a4a" : currentPos ? "#5a8a5a" : "#8a7a4a" }} className="loc-pulse" />
-              <span style={S.locText}>{gpsError ? "GPS不可" : currentPos ? "GPS取得済" : "GPS取得中"}</span>
+              <span style={{
+                ...S.locDot,
+                background: gpsError ? "#8a4a4a" : currentPos ? "#5a8a5a" : "#8a7a4a"
+              }} className="loc-pulse" />
+              <span style={S.locText}>
+                {gpsError ? "GPS不可" : currentPos ? "GPS取得済" : "GPS取得中"}
+              </span>
             </div>
           </div>
 
           <div style={S.tabBar}>
-            {["nearby", "mine"].map(t => (
-              <button key={t} style={{ ...S.tabBtn, ...(tab === t ? S.tabActive : {}) }} onClick={() => setTab(t)}>
-                {t === "nearby" ? "近くの痕跡" : "自分の痕跡"}
+            {[["nearby","近くの痕跡"],["mine","自分の痕跡"]].map(([t,label]) => (
+              <button key={t}
+                style={{ ...S.tabBtn, ...(tab === t ? S.tabActive : {}) }}
+                onClick={() => setTab(t)}>
+                {label}
+                {t === "mine" && myRemnants.length > 0 && (
+                  <span style={S.tabCount}>{myRemnants.length}</span>
+                )}
               </button>
             ))}
           </div>
@@ -178,9 +200,11 @@ export default function RemnantLog() {
               <div style={S.arBanner}>
                 <div>
                   <div style={S.arBannerMain}>
-                    {remnants.length > 0 ? `${remnants.length}件の痕跡が近くにあります` : "近くに痕跡はありません"}
+                    {remnants.length > 0
+                      ? `${remnants.length}件の痕跡が近くにあります`
+                      : "近くに痕跡はありません"}
                   </div>
-                  <div style={S.arBannerSub}>カメラで現実空間に表示します</div>
+                  <div style={S.arBannerSub}>ARカメラで現実空間に表示します</div>
                 </div>
                 <button
                   style={{ ...S.arBtn, opacity: remnants.length > 0 && currentPos ? 1 : 0.3 }}
@@ -190,38 +214,57 @@ export default function RemnantLog() {
                 </button>
               </div>
 
-              {remnants.filter(r => r.uid !== uid).map((item, i) => (
-                <div key={item.id} style={{ ...S.card, animationDelay: `${i * 60}ms` }} className="fade-up">
+              {otherRemnants.length === 0 && (
+                <div style={S.stateMsg}>近くに他の人の痕跡はありません</div>
+              )}
+              {otherRemnants.map((item, i) => (
+                <div key={item.id}
+                  style={{ ...S.card, animationDelay: `${i*60}ms` }}
+                  className="fade-up">
                   <div style={S.cardMeta}>
-                    <button style={S.uidBtn} onClick={() => openTrail(item.uid)}>{item.uid}</button>
+                    <button style={S.uidBtn} onClick={() => openTrail(item.uid)}>
+                      {item.uid}
+                    </button>
                     <span style={S.cardDist}>{item.distance}m</span>
-                    <span style={{ ...S.expiryBadge, ...(item.expires === "forever" ? S.forever : S.week) }}>
+                    <span style={{
+                      ...S.expiryBadge,
+                      ...(item.expires === "forever" ? S.forever : S.week)
+                    }}>
                       {item.expires === "forever" ? "永遠" : "1週間"}
                     </span>
                   </div>
                   <div style={S.cardTs}>{item.timestamp}</div>
                 </div>
               ))}
-
-              {remnants.filter(r => r.uid !== uid).length === 0 && !loading && (
-                <div style={S.stateMsg}>近くに他の人の痕跡はありません</div>
-              )}
             </div>
           )}
 
           {/* 自分の痕跡タブ */}
           {tab === "mine" && !loading && (
             <div style={S.list}>
-              {myRemnants.length === 0 && <div style={S.stateMsg}>まだ何も残していません</div>}
+              {myRemnants.length === 0 && (
+                <div style={S.stateMsg}>まだ何も残していません</div>
+              )}
               {myRemnants.map((item, i) => (
-                <div key={item.id} style={{ ...S.card, animationDelay: `${i * 60}ms` }} className="fade-up">
+                <div key={item.id}
+                  style={{ ...S.card, animationDelay: `${i*60}ms` }}
+                  className="fade-up">
                   <div style={S.cardMeta}>
                     <span style={S.myTag}>自分</span>
-                    <span style={S.cardDist}>{item.distance === 0 ? "現在地" : `${item.distance}m`}</span>
-                    <span style={{ ...S.expiryBadge, ...(item.expires === "forever" ? S.forever : S.week) }}>
+                    <span style={S.cardDist}>
+                      {item.distance === 0 ? "現在地" : `${item.distance}m`}
+                    </span>
+                    <span style={{
+                      ...S.expiryBadge,
+                      ...(item.expires === "forever" ? S.forever : S.week)
+                    }}>
                       {item.expires === "forever" ? "永遠" : "1週間"}
                     </span>
-                    <button style={S.deleteBtn} onClick={() => { setDeleteTarget(item); setDeleteError(null); setView("delete_confirm"); }}>削除</button>
+                    <button style={S.deleteBtn} onClick={() => {
+                      setDeleteTarget(item);
+                      setDeleteError(null);
+                      setView("delete_confirm");
+                    }}>削除</button>
                   </div>
                   <div style={S.myCardText}>{item.text}</div>
                   <div style={S.cardTs}>{item.timestamp}</div>
@@ -240,7 +283,12 @@ export default function RemnantLog() {
       {/* ══ WRITE ══ */}
       {view === "write" && (
         <div style={S.screen}>
-          <button style={S.backBtn} onClick={() => { setView("home"); setDraft({ text: "", expires: null }); setCharCount(0); }}>← 戻る</button>
+          <button style={S.backBtn} onClick={() => {
+            setView("home");
+            setDraft({ text: "", expires: null });
+            setCharCount(0);
+          }}>← 戻る</button>
+
           {posted ? (
             <div style={S.postedWrap} className="fade-in">
               <div style={S.postedMain}>残されました。</div>
@@ -252,11 +300,18 @@ export default function RemnantLog() {
               <div style={S.textareaWrap}>
                 <textarea style={S.textarea}
                   placeholder={"今、ここで感じていることを残してください。"}
-                  value={draft.text} maxLength={100}
-                  onChange={e => { setDraft({ ...draft, text: e.target.value }); setCharCount(e.target.value.length); }} />
-                <div style={S.charBar}><div style={{ ...S.charFill, width: `${charCount}%` }} /></div>
+                  value={draft.text}
+                  maxLength={100}
+                  onChange={e => {
+                    setDraft({ ...draft, text: e.target.value });
+                    setCharCount(e.target.value.length);
+                  }} />
+                <div style={S.charBar}>
+                  <div style={{ ...S.charFill, width: `${charCount}%` }} />
+                </div>
                 <div style={S.charNum}>{charCount} / 100</div>
               </div>
+
               <div style={S.expiryLabel}>この想いは、いつまで残しますか</div>
               <div style={S.expiryOptions}>
                 {DURATION_OPTIONS.map(opt => (
@@ -268,8 +323,12 @@ export default function RemnantLog() {
                   </button>
                 ))}
               </div>
-              {!currentPos && <div style={S.errorMsg}>GPS取得中です。しばらくお待ちください。</div>}
-              <button style={{ ...S.postBtn, opacity: draft.text.trim() && draft.expires && currentPos ? 1 : 0.25 }}
+
+              {!currentPos && (
+                <div style={S.errorMsg}>GPS取得中です。しばらくお待ちください。</div>
+              )}
+              <button
+                style={{ ...S.postBtn, opacity: draft.text.trim() && draft.expires && currentPos ? 1 : 0.25 }}
                 disabled={!draft.text.trim() || !draft.expires || !currentPos}
                 onClick={handlePost}>
                 この場所に残す
@@ -298,7 +357,11 @@ export default function RemnantLog() {
                 <div style={S.trailRight}>
                   <div style={S.trailRowMeta}>
                     <span style={S.trailTs}>{item.timestamp}</span>
-                    <span style={{ ...S.expiryBadge, ...(item.expires === "forever" ? S.forever : S.week), fontSize: 9 }}>
+                    <span style={{
+                      ...S.expiryBadge,
+                      ...(item.expires === "forever" ? S.forever : S.week),
+                      fontSize: 9
+                    }}>
                       {item.expires === "forever" ? "永遠" : "1週間"}
                     </span>
                   </div>
@@ -313,7 +376,11 @@ export default function RemnantLog() {
       {/* ══ DELETE CONFIRM ══ */}
       {view === "delete_confirm" && deleteTarget && (
         <div style={S.screen}>
-          <button style={S.backBtn} onClick={() => { setDeleteTarget(null); setDeleteError(null); setView("home"); }}>← 戻る</button>
+          <button style={S.backBtn} onClick={() => {
+            setDeleteTarget(null);
+            setDeleteError(null);
+            setView("home");
+          }}>← 戻る</button>
           <div style={S.deleteWrap}>
             <div style={S.deleteTitle}>本当に消しますか</div>
             <div style={S.deleteDesc}>
@@ -325,7 +392,11 @@ export default function RemnantLog() {
             <div style={S.deleteMeta}>{deleteTarget.timestamp}</div>
             {deleteError && <div style={S.errorMsg}>{deleteError}</div>}
             <button style={S.deleteConfirmBtn} onClick={handleDeleteConfirm}>消す</button>
-            <button style={S.deleteCancelBtn} onClick={() => { setDeleteTarget(null); setDeleteError(null); setView("home"); }}>やっぱり残す</button>
+            <button style={S.deleteCancelBtn} onClick={() => {
+              setDeleteTarget(null);
+              setDeleteError(null);
+              setView("home");
+            }}>やっぱり残す</button>
           </div>
         </div>
       )}
@@ -337,14 +408,14 @@ const S = {
   root: { background:"#0a0908", minHeight:"100vh", fontFamily:"'DM Mono','Courier New',monospace", color:"#ccc8c0", maxWidth:430, margin:"0 auto", position:"relative", overflowX:"hidden" },
   screen: { minHeight:"100vh", display:"flex", flexDirection:"column", paddingBottom:100 },
   header: { padding:"24px 22px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid #151310" },
-  logoWrap: { display:"flex", alignItems:"center", gap:10 },
-  logoImg: { height:28, width:"auto", objectFit:"contain", flexShrink:0 },
+  logoImg: { height:28, width:"auto", objectFit:"contain" },
   locBadge: { display:"flex", alignItems:"center", gap:7, padding:"6px 10px", border:"1px solid #1c1a16", borderRadius:20 },
   locDot: { width:6, height:6, borderRadius:"50%", display:"block" },
   locText: { fontSize:9, color:"#3a3830", letterSpacing:"0.1em" },
   tabBar: { display:"flex", borderBottom:"1px solid #111" },
-  tabBtn: { flex:1, padding:"13px", background:"none", border:"none", color:"#383530", fontSize:11, letterSpacing:"0.12em", cursor:"pointer" },
+  tabBtn: { flex:1, padding:"13px", background:"none", border:"none", color:"#383530", fontSize:11, letterSpacing:"0.12em", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 },
   tabActive: { color:"#c8b88a", borderBottom:"1px solid #c8b88a", marginBottom:-1 },
+  tabCount: { fontSize:9, background:"#2a2418", color:"#c8b88a", padding:"1px 5px", borderRadius:8, border:"1px solid #3a3020" },
   list: { flex:1 },
   arBanner: { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"20px 22px", borderBottom:"1px solid #151310", background:"#0e0c0a" },
   arBannerMain: { fontSize:12, color:"#d4d0c8", letterSpacing:"0.04em", marginBottom:4 },

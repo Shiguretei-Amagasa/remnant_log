@@ -7,14 +7,10 @@ import {
   deleteDoc,
   doc,
   query,
-  orderBy,
-  limit,
   where,
   serverTimestamp,
 } from 'firebase/firestore';
 
-// 秘匿情報はすべて環境変数から取得します
-// 値はGitHub Secretsに登録し、deploy.ymlで注入されます
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -27,7 +23,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 
-// 匿名UID（端末のlocalStorageに保存）
+// 匿名UID（端末に保存）
 export function getUserUID() {
   let uid = localStorage.getItem('remnant_uid');
   if (!uid) {
@@ -43,32 +39,34 @@ export function haversineDistance(lat1, lng1, lat2, lng2) {
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    Math.sin(dLat/2)**2 +
+    Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// 近くの痕跡を取得（半径300m以内）
+// 近くの痕跡を取得
+// orderByを使わずクライアント側でソート（Compositeインデックス不要）
 export async function loadNearbyRemnants(lat, lng, radiusM = 300) {
-  const q = query(
-    collection(db, 'remnants'),
-    orderBy('timestamp', 'desc'),
-    limit(100)
-  );
-  const snapshot = await getDocs(q);
+  const snapshot = await getDocs(collection(db, 'remnants'));
   const now = new Date();
   return snapshot.docs
     .map(d => ({ id: d.id, ...d.data() }))
     .filter(r => {
-      if (r.expires === 'week' && r.expiresAt && r.expiresAt.toDate() < now) return false;
+      if (!r.lat || !r.lng) return false;
+      if (r.expires === 'week' && r.expiresAt) {
+        const exp = r.expiresAt.toDate ? r.expiresAt.toDate() : new Date(r.expiresAt);
+        if (exp < now) return false;
+      }
       return haversineDistance(lat, lng, r.lat, r.lng) <= radiusM;
     })
     .map(r => ({
       ...r,
       distance: Math.round(haversineDistance(lat, lng, r.lat, r.lng)),
-      timestamp: r.timestamp?.toDate().toISOString().slice(0, 10).replace(/-/g, '.') || '',
-    }));
+      timestamp: r.timestamp?.toDate
+        ? r.timestamp.toDate().toISOString().slice(0,10).replace(/-/g,'.')
+        : '',
+    }))
+    .sort((a, b) => a.distance - b.distance);
 }
 
 // 痕跡を投稿
@@ -84,17 +82,17 @@ export async function postRemnant({ text, expires, lat, lng, uid }) {
 
 // 同一UIDの足跡を取得
 export async function loadTrailByUID(uid) {
-  const q = query(
-    collection(db, 'remnants'),
-    where('uid', '==', uid),
-    orderBy('timestamp', 'desc')
-  );
+  const q = query(collection(db, 'remnants'), where('uid', '==', uid));
   const snapshot = await getDocs(q);
-  return snapshot.docs.map(d => ({
-    id: d.id,
-    ...d.data(),
-    timestamp: d.data().timestamp?.toDate().toISOString().slice(0, 10).replace(/-/g, '.') || '',
-  }));
+  return snapshot.docs
+    .map(d => ({
+      id: d.id,
+      ...d.data(),
+      timestamp: d.data().timestamp?.toDate
+        ? d.data().timestamp.toDate().toISOString().slice(0,10).replace(/-/g,'.')
+        : '',
+    }))
+    .sort((a, b) => (b.timestamp > a.timestamp ? 1 : -1));
 }
 
 // 痕跡を削除
