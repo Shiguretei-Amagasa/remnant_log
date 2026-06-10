@@ -101,15 +101,36 @@ export default function RemnantLog() {
   const handlePost = async () => {
     if (!draft.text.trim() || !draft.expires || !currentPos) return;
     setPosted(true);
+
+    // 楽観的更新：Firestoreの応答を待たずにローカルstateに即追加
+    const optimisticItem = {
+      id: `local_${Date.now()}`,
+      text: draft.text,
+      expires: draft.expires,
+      lat: currentPos.lat,
+      lng: currentPos.lng,
+      uid,
+      distance: 0,
+      timestamp: new Date().toISOString().slice(0,10).replace(/-/g,'.'),
+    };
+    setRemnants(prev => [optimisticItem, ...prev]);
+
     try {
       await postRemnant({
         text: draft.text, expires: draft.expires,
         lat: currentPos.lat, lng: currentPos.lng, uid,
       });
-      // 投稿後に再取得
-      const data = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
-      setRemnants(data);
-    } catch(e) { console.error('Post error:', e); }
+      // 投稿成功後にFirestoreから再取得して楽観的更新を正式なデータに置換
+      setTimeout(async () => {
+        const data = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
+        setRemnants(data);
+      }, 1500);
+    } catch(e) {
+      console.error('Post error:', e);
+      // 失敗時は楽観的更新を取り消す
+      setRemnants(prev => prev.filter(r => r.id !== optimisticItem.id));
+    }
+
     setTimeout(() => {
       setPosted(false);
       setDraft({ text: "", expires: null });
@@ -121,7 +142,19 @@ export default function RemnantLog() {
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
-    // 「永遠」の場合は場所チェック
+
+    // 楽観的更新で追加されたローカルアイテムはFirestoreに存在しないため
+    // stateから直接削除する
+    if (String(deleteTarget.id).startsWith('local_')) {
+      setRemnants(prev => prev.filter(r => r.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      setDeleteError(null);
+      setView("home");
+      setTab("mine");
+      return;
+    }
+
+    // 「永遠」の場合の距離チェック（GPS取得済みの場合のみ）
     if (deleteTarget.expires === "forever" && currentPos) {
       const dist = haversineDistance(
         currentPos.lat, currentPos.lng,
@@ -132,13 +165,20 @@ export default function RemnantLog() {
         return;
       }
     }
+
     try {
       await deleteRemnant(deleteTarget.id);
+      setRemnants(prev => prev.filter(r => r.id !== deleteTarget.id));
       if (currentPos) {
         const data = await loadNearbyRemnants(currentPos.lat, currentPos.lng);
         setRemnants(data);
       }
-    } catch(e) { console.error('Delete error:', e); }
+    } catch(e) {
+      console.error('Delete error:', e);
+      setDeleteError('削除に失敗しました。もう一度試してください。');
+      return;
+    }
+
     setDeleteTarget(null);
     setDeleteError(null);
     setView("home");
@@ -200,11 +240,15 @@ export default function RemnantLog() {
               <div style={S.arBanner}>
                 <div>
                   <div style={S.arBannerMain}>
-                    {remnants.length > 0
-                      ? `${remnants.length}件の痕跡が近くにあります`
-                      : "近くに痕跡はありません"}
+                    {otherRemnants.length > 0
+                      ? `${otherRemnants.length}件の痕跡が近くにあります`
+                      : "近くに他の人の痕跡はありません"}
                   </div>
-                  <div style={S.arBannerSub}>ARカメラで現実空間に表示します</div>
+                  <div style={S.arBannerSub}>
+                    {myRemnants.length > 0
+                      ? `自分の痕跡${myRemnants.length}件を含めARで確認できます`
+                      : "ARカメラで現実空間に表示します"}
+                  </div>
                 </div>
                 <button
                   style={{ ...S.arBtn, opacity: remnants.length > 0 && currentPos ? 1 : 0.3 }}
