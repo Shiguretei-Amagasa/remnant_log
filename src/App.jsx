@@ -27,6 +27,7 @@ export default function RemnantLog() {
   const [notification, setNotification] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError]   = useState(null);
+  const [deleting, setDeleting]         = useState(false);
   const [loading, setLoading]           = useState(true);
   const [gpsError, setGpsError]         = useState(null);
   const [currentPos, setCurrentPos]     = useState(null);
@@ -141,20 +142,21 @@ export default function RemnantLog() {
   };
 
   const handleDeleteConfirm = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
 
-    // 楽観的更新で追加されたローカルアイテムはFirestoreに存在しないため
-    // stateから直接削除する
+    // 楽観的更新のローカルアイテムはstateから直接削除
     if (String(deleteTarget.id).startsWith('local_')) {
       setRemnants(prev => prev.filter(r => r.id !== deleteTarget.id));
       setDeleteTarget(null);
       setDeleteError(null);
+      setDeleting(false);
       setView("home");
       setTab("mine");
       return;
     }
 
-    // 「永遠」の場合の距離チェック（GPS取得済みの場合のみ）
+    // 「永遠」の場合の距離チェック
     if (deleteTarget.expires === "forever" && currentPos) {
       const dist = haversineDistance(
         currentPos.lat, currentPos.lng,
@@ -162,6 +164,7 @@ export default function RemnantLog() {
       );
       if (dist > 30) {
         setDeleteError(`削除するにはその場所に戻る必要があります（現在${Math.round(dist)}m離れています）`);
+        setDeleting(false);
         return;
       }
     }
@@ -176,11 +179,13 @@ export default function RemnantLog() {
     } catch(e) {
       console.error('Delete error:', e);
       setDeleteError('削除に失敗しました。もう一度試してください。');
+      setDeleting(false);
       return;
     }
 
     setDeleteTarget(null);
     setDeleteError(null);
+    setDeleting(false);
     setView("home");
     setTab("mine");
   };
@@ -435,7 +440,12 @@ export default function RemnantLog() {
             <div style={S.deletePreview}>{deleteTarget.text}</div>
             <div style={S.deleteMeta}>{deleteTarget.timestamp}</div>
             {deleteError && <div style={S.errorMsg}>{deleteError}</div>}
-            <button style={S.deleteConfirmBtn} onClick={handleDeleteConfirm}>消す</button>
+            <button
+              style={{ ...S.deleteConfirmBtn, opacity: deleting ? 0.5 : 1 }}
+              disabled={deleting}
+              onClick={handleDeleteConfirm}>
+              {deleting ? '削除中...' : '消す'}
+            </button>
             <button style={S.deleteCancelBtn} onClick={() => {
               setDeleteTarget(null);
               setDeleteError(null);
