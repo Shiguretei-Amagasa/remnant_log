@@ -22,13 +22,34 @@
     #ov-msg { font-size:11px; color:#3a3832; letter-spacing:0.15em; text-align:center; line-height:2.2; padding:0 32px; }
 
     #msg-panel {
-      position:fixed; bottom:0; left:0; right:0; z-index:800;
-      background:#0e0c0a; border-top:1px solid #2a2620;
-      padding:20px 22px 40px;
-      transform:translateY(100%);
-      transition:transform 0.35s cubic-bezier(0.16,1,0.3,1);
+      position:fixed;
+      top:50%; left:50%;
+      transform:translate(-50%, -40%) scale(0.95);
+      width:88%; max-width:380px;
+      z-index:800;
+      background:#0e0c0a;
+      border:1px solid #2a2620;
+      border-radius:8px;
+      padding:22px 22px 24px;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity 0.25s ease, transform 0.25s cubic-bezier(0.16,1,0.3,1);
     }
-    #msg-panel.open { transform:translateY(0); }
+    #msg-panel.open {
+      opacity:1;
+      pointer-events:all;
+      transform:translate(-50%, -40%) scale(1);
+    }
+    /* カメラ映像の彩度を落とすオーバーレイ */
+    #desat-overlay {
+      position:fixed; inset:0; z-index:750;
+      background:rgba(0,0,0,0.5);
+      backdrop-filter:saturate(0.1) brightness(0.7);
+      -webkit-backdrop-filter:saturate(0.1) brightness(0.7);
+      opacity:0; pointer-events:none;
+      transition:opacity 0.25s ease;
+    }
+    #desat-overlay.open { opacity:1; }
     #msg-top  { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
     #msg-uid  { font-size:10px; color:#c8b88a; letter-spacing:0.1em; }
     #msg-ts   { font-size:9px; color:#3a3832; }
@@ -62,6 +83,7 @@
     <div id="ov-msg">起動しています<br>カメラと位置情報の許可ダイアログが表示されたら「許可」を選んでください</div>
   </div>
 
+  <div id="desat-overlay"></div>
   <div id="msg-panel">
     <div id="msg-top">
       <span id="msg-uid"></span>
@@ -108,11 +130,13 @@
       document.getElementById('msg-exp').textContent  =
         r.expires === 'forever' ? '永遠に残る' : '1週間で消える';
       document.getElementById('msg-panel').classList.add('open');
+      document.getElementById('desat-overlay').classList.add('open');
       document.getElementById('hint').classList.add('hidden');
     }
 
     function closeMsg() {
       document.getElementById('msg-panel').classList.remove('open');
+      document.getElementById('desat-overlay').classList.remove('open');
       document.getElementById('hint').classList.remove('hidden');
     }
 
@@ -120,19 +144,17 @@
       const c = document.createElement('canvas');
       c.width = c.height = 256;
       const ctx = c.getContext('2d');
-      const col = isOwn ? '138,184,200' : '200,184,138';
-      // 外側グロー（大きめ）
+      // 自分：黄緑　他者：マゼンタ
+      const col = isOwn ? '154,220,50' : '220,50,180';
       const g = ctx.createRadialGradient(128,128,16,128,128,120);
-      g.addColorStop(0,   `rgba(${col},0.98)`);
-      g.addColorStop(0.35,`rgba(${col},0.6)`);
-      g.addColorStop(0.7, `rgba(${col},0.2)`);
-      g.addColorStop(1,   `rgba(${col},0)`);
+      g.addColorStop(0,    `rgba(${col},0.98)`);
+      g.addColorStop(0.35, `rgba(${col},0.6)`);
+      g.addColorStop(0.7,  `rgba(${col},0.2)`);
+      g.addColorStop(1,    `rgba(${col},0)`);
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(128,128,120,0,Math.PI*2); ctx.fill();
-      // コア
       ctx.fillStyle = `rgba(${col},1)`;
       ctx.beginPath(); ctx.arc(128,128,18,0,Math.PI*2); ctx.fill();
-      // リング
       ctx.strokeStyle = `rgba(${col},0.7)`;
       ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(128,128,50,0,Math.PI*2); ctx.stroke();
