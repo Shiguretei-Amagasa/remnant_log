@@ -291,6 +291,21 @@ export default function RemnantLog() {
           {/* 自分の痕跡タブ */}
           {tab === "mine" && !loading && (
             <div style={S.list}>
+              {/* 自分の投稿のARバナー */}
+              {myRemnants.length > 0 && (
+                <div style={S.arBanner}>
+                  <div>
+                    <div style={S.arBannerMain}>自分の痕跡{myRemnants.length}件</div>
+                    <div style={S.arBannerSub}>ARカメラで現実空間に表示します</div>
+                  </div>
+                  <button
+                    style={{ ...S.arBtn, opacity: currentPos ? 1 : 0.3 }}
+                    disabled={!currentPos}
+                    onClick={openARCamera}>
+                    ARカメラ
+                  </button>
+                </div>
+              )}
               {myRemnants.length === 0 && (
                 <div style={S.stateMsg}>まだ何も残していません</div>
               )}
