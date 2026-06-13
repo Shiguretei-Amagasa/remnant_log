@@ -142,61 +142,91 @@
 
     function makeMarker(isOwn) {
       const c = document.createElement('canvas');
-      c.width = 256; c.height = 512;
+      // 自分：パープル #6D5498、他者：黄緑 #5AFF19
+      const rgb = isOwn ? [109, 84, 152] : [90, 255, 25];
+      const col = rgb.join(',');
+
+      c.width  = 160;
+      c.height = 384;
       const ctx = c.getContext('2d');
 
-      // 自分：黄緑　他者：マゼンタ（明度を上げた鮮やかな色）
-      const rgb  = isOwn ? [200, 255, 80] : [255, 80, 220];
-      const col  = rgb.join(',');
-
-      // グロー設定
-      ctx.shadowColor = `rgba(${col},1)`;
-      ctx.shadowBlur  = 28;
-
-      // メインの亀裂（ジグザグパス）
-      function crack(points, width, alpha) {
-        ctx.beginPath();
-        ctx.moveTo(points[0][0], points[0][1]);
-        for (let i = 1; i < points.length; i++) {
-          ctx.lineTo(points[i][0], points[i][1]);
-        }
-        ctx.strokeStyle = `rgba(${col},${alpha})`;
-        ctx.lineWidth   = width;
-        ctx.lineCap     = 'round';
-        ctx.lineJoin    = 'round';
-        ctx.stroke();
-      }
-
-      // 亀裂の主線
-      const main = [
-        [128,  10], [118,  60], [145,  95],
-        [108, 155], [140, 200], [112, 265],
-        [138, 320], [118, 380], [128, 500],
+      // 亀裂の左右エッジ（隙間を広めに取る）
+      const L = [
+        [72,  8], [58, 58], [78, 95],
+        [50, 152], [72, 198], [48, 258],
+        [68, 308], [55, 375],
       ];
-      crack(main, 6, 1.0);   // コア
-      crack(main, 14, 0.4);  // 中間グロー
-      crack(main, 28, 0.15); // 外側グロー
+      const R = [
+        [88,  8], [102, 58], [82, 95],
+        [110, 152], [88, 198], [112, 258],
+        [92, 308], [105, 375],
+      ];
 
-      // 枝亀裂（左右に分岐）
-      const branch1 = [[118,60],[90,90],[72,80]];
-      const branch2 = [[145,95],[170,120],[190,110]];
-      const branch3 = [[108,155],[80,170],[65,165]];
-      const branch4 = [[140,200],[165,230],[178,225]];
-      const branch5 = [[112,265],[88,285],[74,278]];
+      // ① 亀裂の内側を暗く塗りつぶす（裂け目の空洞感）
+      ctx.beginPath();
+      ctx.moveTo(L[0][0], L[0][1]);
+      L.forEach(p => ctx.lineTo(p[0], p[1]));
+      [...R].reverse().forEach(p => ctx.lineTo(p[0], p[1]));
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(0,0,0,0.92)';
+      ctx.fill();
 
-      [branch1,branch2,branch3,branch4,branch5].forEach(b => {
-        crack(b, 3, 0.9);
-        crack(b, 8, 0.3);
+      // ② 亀裂の枝
+      const branches = [
+        [[58,58],[36,78],[24,72]],
+        [[102,58],[124,75],[136,68]],
+        [[50,152],[28,165],[18,160]],
+        [[110,152],[132,168],[142,162]],
+        [[48,258],[28,272],[18,268]],
+        [[112,258],[134,275],[144,270]],
+      ];
+      branches.forEach(([a,b,c2]) => {
+        // 枝の暗い空洞
+        ctx.beginPath();
+        ctx.moveTo(a[0]-3,a[1]); ctx.lineTo(b[0],b[1]); ctx.lineTo(c2[0],c2[1]);
+        ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+        ctx.lineWidth = 5;
+        ctx.stroke();
+        // 枝の内側光
+        ctx.shadowColor = `rgba(${col},0.8)`;
+        ctx.shadowBlur  = 8;
+        ctx.beginPath();
+        ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.lineTo(c2[0],c2[1]);
+        ctx.strokeStyle = `rgba(${col},0.7)`;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
       });
 
-      // 亀裂の内側（暗い裂け目）
-      ctx.shadowBlur = 0;
+      // ③ 亀裂の内側エッジに光を描く（内側から漏れる光）
+      // 左エッジ
+      ctx.shadowColor = `rgba(${col},1)`;
+      ctx.shadowBlur  = 10;
+      ctx.strokeStyle = `rgba(${col},0.95)`;
+      ctx.lineWidth   = 1.5;
       ctx.beginPath();
-      ctx.moveTo(main[0][0], main[0][1]);
-      for (let i = 1; i < main.length; i++) ctx.lineTo(main[i][0], main[i][1]);
-      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-      ctx.lineWidth = 2;
+      ctx.moveTo(L[0][0], L[0][1]);
+      L.forEach(p => ctx.lineTo(p[0], p[1]));
       ctx.stroke();
+
+      // 右エッジ
+      ctx.beginPath();
+      ctx.moveTo(R[0][0], R[0][1]);
+      R.forEach(p => ctx.lineTo(p[0], p[1]));
+      ctx.stroke();
+
+      // ④ 亀裂の中央に薄い光の芯（内部発光）
+      ctx.shadowBlur  = 18;
+      ctx.strokeStyle = `rgba(${col},0.35)`;
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      L.forEach((p, i) => {
+        const mx = (p[0] + R[i][0]) / 2;
+        const my = (p[1] + R[i][1]) / 2;
+        i === 0 ? ctx.moveTo(mx, my) : ctx.lineTo(mx, my);
+      });
+      ctx.stroke();
+      ctx.shadowBlur = 0;
 
       return c;
     }
@@ -216,8 +246,8 @@
         const pos = isOwn ? '0 2 -2' : '0 2 0';
 
         const plane = document.createElement('a-plane');
-        plane.setAttribute('width',    '1.5');
-        plane.setAttribute('height',   '4');
+        plane.setAttribute('width',    '0.8');
+        plane.setAttribute('height',   '2');
         plane.setAttribute('position', pos);
         plane.setAttribute('look-at',  '[gps-projected-camera]');
         plane.setAttribute('class',    'clickable');
