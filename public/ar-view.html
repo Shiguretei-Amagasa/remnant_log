@@ -140,95 +140,147 @@
       document.getElementById('hint').classList.remove('hidden');
     }
 
+    function seededRand(seed) {
+      let s = seed;
+      return () => {
+        s = (s * 1103515245 + 12345) & 0x7fffffff;
+        return s / 0x7fffffff;
+      };
+    }
+
     function makeMarker(isOwn) {
-      const c = document.createElement('canvas');
-      // 自分：パープル #6D5498、他者：黄緑 #5AFF19
-      const rgb = isOwn ? [109, 84, 152] : [90, 255, 25];
-      const col = rgb.join(',');
+      const W = 512, H = 512; // 長さを半分に
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
 
-      c.width  = 160;
-      c.height = 384;
-      const ctx = c.getContext('2d');
+      const rgb    = isOwn ? [109, 84, 152] : [90, 255, 25];
+      const colStr = rgb.join(',');
 
-      // 亀裂の左右エッジ（隙間を広めに取る）
-      const L = [
-        [72,  8], [58, 58], [78, 95],
-        [50, 152], [72, 198], [48, 258],
-        [68, 308], [55, 375],
-      ];
-      const R = [
-        [88,  8], [102, 58], [82, 95],
-        [110, 152], [88, 198], [112, 258],
-        [92, 308], [105, 375],
-      ];
+      // ユーザー指定パラメータ
+      const GAP       = 8;
+      const ROUGH     = 120;
+      const BRANCHES  = 8;
+      const GLOW      = 9;
+      const GLOW_A    = 0.22;
+      const VOID_DARK = 1.00;
+      const EDGE_A    = 0.21;
+      const SEED      = 999;
 
-      // ① 亀裂の内側を暗く塗りつぶす（裂け目の空洞感）
-      ctx.beginPath();
-      ctx.moveTo(L[0][0], L[0][1]);
-      L.forEach(p => ctx.lineTo(p[0], p[1]));
-      [...R].reverse().forEach(p => ctx.lineTo(p[0], p[1]));
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(0,0,0,0.92)';
-      ctx.fill();
+      const rand = seededRand(SEED + (isOwn ? 500 : 0));
 
-      // ② 亀裂の枝
-      const branches = [
-        [[58,58],[36,78],[24,72]],
-        [[102,58],[124,75],[136,68]],
-        [[50,152],[28,165],[18,160]],
-        [[110,152],[132,168],[142,162]],
-        [[48,258],[28,272],[18,268]],
-        [[112,258],[134,275],[144,270]],
-      ];
-      branches.forEach(([a,b,c2]) => {
-        // 枝の暗い空洞
+      function displace(pts, roughness, depth) {
+        if (depth === 0) return pts;
+        const result = [pts[0]];
+        for (let i = 0; i < pts.length - 1; i++) {
+          const [x1,y1] = pts[i], [x2,y2] = pts[i+1];
+          const mx = (x1+x2)/2 + (rand()-0.5)*roughness;
+          const my = (y1+y2)/2 + (rand()-0.5)*roughness*0.12;
+          result.push([mx,my], pts[i+1]);
+        }
+        return displace(result, roughness*0.6, depth-1);
+      }
+
+      const spine = displace(
+        [[W/2,16],[W/2-15,H*0.28],[W/2+12,H*0.52],[W/2-8,H*0.74],[W/2+4,H-16]],
+        ROUGH, 5
+      );
+
+      function buildEdge(pts, side) {
+        return pts.map((p,i) => {
+          const nx = pts[Math.min(i+1,pts.length-1)];
+          const pv = pts[Math.max(i-1,0)];
+          const dx = nx[0]-pv[0], dy = nx[1]-pv[1];
+          const len = Math.sqrt(dx*dx+dy*dy)||1;
+          const nx2=-dy/len, ny2=dx/len;
+          const jit = (rand()-0.5)*8;
+          return [p[0]+nx2*(GAP/2+jit)*side, p[1]+ny2*(GAP/2+jit)*side];
+        });
+      }
+
+      const LE = buildEdge(spine,-1);
+      const RE = buildEdge(spine, 1);
+
+      function paintGlow(edge, outDir, glowW, alpha) {
+        for (let i = 0; i < edge.length-1; i++) {
+          const [x1,y1]=edge[i],[x2,y2]=edge[i+1];
+          const dx=x2-x1,dy=y2-y1;
+          const len=Math.sqrt(dx*dx+dy*dy); if(len<0.1) continue;
+          const nx=-dy/len*outDir, ny=dx/len*outDir;
+          try {
+            const gr = ctx.createLinearGradient(x1,y1,x1+nx*glowW,y1+ny*glowW);
+            gr.addColorStop(0,`rgba(${colStr},${alpha})`);
+            gr.addColorStop(1,`rgba(${colStr},0)`);
+            ctx.fillStyle=gr;
+            ctx.beginPath();
+            ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
+            ctx.lineTo(x2+nx*glowW,y2+ny*glowW);
+            ctx.lineTo(x1+nx*glowW,y1+ny*glowW);
+            ctx.fill();
+          } catch(e){}
+        }
+      }
+
+      paintGlow(LE,-1,GLOW*1.6,GLOW_A*0.5);
+      paintGlow(RE, 1,GLOW*1.6,GLOW_A*0.5);
+      paintGlow(LE,-1,GLOW,    GLOW_A*0.8);
+      paintGlow(RE, 1,GLOW,    GLOW_A*0.8);
+      paintGlow(LE,-1,GLOW*0.4,GLOW_A);
+      paintGlow(RE, 1,GLOW*0.4,GLOW_A);
+
+      function fillVoid(l,r,alpha) {
         ctx.beginPath();
-        ctx.moveTo(a[0]-3,a[1]); ctx.lineTo(b[0],b[1]); ctx.lineTo(c2[0],c2[1]);
-        ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-        ctx.lineWidth = 5;
-        ctx.stroke();
-        // 枝の内側光
-        ctx.shadowColor = `rgba(${col},0.8)`;
-        ctx.shadowBlur  = 8;
+        ctx.moveTo(l[0][0],l[0][1]);
+        l.forEach(p=>ctx.lineTo(p[0],p[1]));
+        [...r].reverse().forEach(p=>ctx.lineTo(p[0],p[1]));
+        ctx.closePath();
+        ctx.fillStyle=`rgba(0,0,0,${alpha})`;
+        ctx.fill();
+      }
+      fillVoid(LE,RE,VOID_DARK);
+
+      function strokeEdge(edge,w,alpha) {
         ctx.beginPath();
-        ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.lineTo(c2[0],c2[1]);
-        ctx.strokeStyle = `rgba(${col},0.7)`;
-        ctx.lineWidth = 1.5;
+        edge.forEach((p,i)=>i===0?ctx.moveTo(p[0],p[1]):ctx.lineTo(p[0],p[1]));
+        ctx.strokeStyle=`rgba(${colStr},${alpha})`;
+        ctx.lineWidth=w;
+        ctx.lineJoin='round'; ctx.lineCap='round';
         ctx.stroke();
-        ctx.shadowBlur = 0;
-      });
+      }
+      strokeEdge(LE,4,EDGE_A*0.6);
+      strokeEdge(RE,4,EDGE_A*0.6);
+      strokeEdge(LE,1.5,EDGE_A);
+      strokeEdge(RE,1.5,EDGE_A);
 
-      // ③ 亀裂の内側エッジに光を描く（内側から漏れる光）
-      // 左エッジ
-      ctx.shadowColor = `rgba(${col},1)`;
-      ctx.shadowBlur  = 10;
-      ctx.strokeStyle = `rgba(${col},0.95)`;
-      ctx.lineWidth   = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(L[0][0], L[0][1]);
-      L.forEach(p => ctx.lineTo(p[0], p[1]));
-      ctx.stroke();
+      for (let b = 0; b < BRANCHES; b++) {
+        const t   = 0.1+(b/BRANCHES)*0.8;
+        const idx = Math.floor(t*spine.length);
+        const [bx,by] = spine[idx];
+        const side = b%2===0?-1:1;
+        const bLen = 35+rand()*40;
+        const ang  = (Math.PI/4+rand()*Math.PI/5)*side;
 
-      // 右エッジ
-      ctx.beginPath();
-      ctx.moveTo(R[0][0], R[0][1]);
-      R.forEach(p => ctx.lineTo(p[0], p[1]));
-      ctx.stroke();
+        const bSpine = displace(
+          [[bx,by],[bx+Math.cos(ang)*bLen*0.6,by+bLen*0.35],[bx+Math.cos(ang)*bLen,by+bLen*0.6]],
+          15,3
+        );
+        const bLE = buildEdge(bSpine,-1).map((p,i)=>[p[0]*0.5+bSpine[i][0]*0.5,p[1]*0.5+bSpine[i][1]*0.5]);
+        const bRE = buildEdge(bSpine, 1).map((p,i)=>[p[0]*0.5+bSpine[i][0]*0.5,p[1]*0.5+bSpine[i][1]*0.5]);
 
-      // ④ 亀裂の中央に薄い光の芯（内部発光）
-      ctx.shadowBlur  = 18;
-      ctx.strokeStyle = `rgba(${col},0.35)`;
-      ctx.lineWidth   = 2;
-      ctx.beginPath();
-      L.forEach((p, i) => {
-        const mx = (p[0] + R[i][0]) / 2;
-        const my = (p[1] + R[i][1]) / 2;
-        i === 0 ? ctx.moveTo(mx, my) : ctx.lineTo(mx, my);
-      });
-      ctx.stroke();
-      ctx.shadowBlur = 0;
+        paintGlow(bLE,-1,GLOW*0.4,GLOW_A*0.7);
+        paintGlow(bRE, 1,GLOW*0.4,GLOW_A*0.7);
+        fillVoid(bLE,bRE,VOID_DARK*0.9);
+        strokeEdge(bLE,2,EDGE_A*0.8);
+        strokeEdge(bRE,2,EDGE_A*0.8);
+        strokeEdge(bLE,1,EDGE_A);
+        strokeEdge(bRE,1,EDGE_A);
+      }
 
-      return c;
+      fillVoid(LE,RE,VOID_DARK*0.5);
+      strokeEdge(LE,2,EDGE_A);
+      strokeEdge(RE,2,EDGE_A);
+
+      return canvas;
     }
 
     function addMarkers() {
@@ -246,8 +298,8 @@
         const pos = isOwn ? '0 2 -2' : '0 2 0';
 
         const plane = document.createElement('a-plane');
-        plane.setAttribute('width',    '0.8');
-        plane.setAttribute('height',   '2');
+        plane.setAttribute('width',    '1.0');
+        plane.setAttribute('height',   '1.0');
         plane.setAttribute('position', pos);
         plane.setAttribute('look-at',  '[gps-projected-camera]');
         plane.setAttribute('class',    'clickable');
